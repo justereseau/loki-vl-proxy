@@ -148,3 +148,38 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # release-please PRs for minor and patch versions merge themselves once
+  # every check above is green (major versions and breaking changes wait for a
+  # human). The built-in token's merge does not trigger push workflows, so the
+  # Release workflow is dispatched explicitly to publish the release.
+  release-automerge:
+    needs: [test, logsql-syntax, e2e, build, image]
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Merge minor/patch release PR and publish
+        run: |
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$GITHUB_REF_NAME" --state open --json number,headRefOid,body --jq '.[0] // empty')
+          if [ -z "$pr" ]; then echo "no open release PR for $GITHUB_REF_NAME"; exit 0; fi
+          number=$(jq -r .number <<<"$pr")
+          if [ "$(jq -r .headRefOid <<<"$pr")" != "$GITHUB_SHA" ]; then
+            echo "release PR #$number moved past the tested commit; a new CI run will handle it"; exit 0
+          fi
+          if jq -r .body <<<"$pr" | grep -qi "breaking change"; then
+            echo "release PR #$number contains breaking changes: manual review"; exit 0
+          fi
+          manifest() { gh api "repos/$GITHUB_REPOSITORY/contents/.release-please-manifest.json?ref=$1" --jq .content | base64 -d | jq -r '.["."] // "0.0.0"'; }
+          cur=$(manifest main); new=$(manifest "$GITHUB_SHA")
+          if [ "${cur%%.*}" != "${new%%.*}" ]; then
+            echo "major release $cur -> $new: manual review"; exit 0
+          fi
+          echo "auto-merging release PR #$number ($cur -> $new)"
+          gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "$GITHUB_SHA"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main

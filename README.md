@@ -328,10 +328,29 @@ Every push to `main` also publishes `ghcr.io/justereseau/loki-vl-proxy:main`
 and `:sha-<commit>` from the CI binaries.
 
 `main` requires the CI checks (`test`, `logsql-syntax`, `e2e`, `build (amd64)`,
-`build (arm64)`, `image`), so pull requests, release PRs included, can use
-GitHub's **auto-merge**. Release PRs are opened with the built-in token, which
-doesn't trigger `pull_request` workflows, so the release workflow dispatches CI
-on them.
+`build (arm64)`, `image`), so pull requests can use GitHub's **auto-merge**.
+
+Release PRs are opened with the built-in token, which doesn't trigger
+`pull_request` workflows, so the release workflow dispatches CI on them. When
+every check is green, a **minor or patch** release PR merges itself and the
+release is published. Major versions and breaking changes wait for a manual
+merge.
+
+### Dependency updates
+
+[Renovate](.github/renovate.json5) keeps dependencies current, starting from
+`config:best-practices`:
+
+- GitHub Actions and Docker base images are pinned to digests.
+- Commit messages follow Conventional Commits.
+- New versions wait 3 days before they're proposed.
+- OSV vulnerability alerts are on.
+
+Minor, patch and digest updates **auto-merge** once CI is green; majors wait
+for review. Updates to what ships (the Go toolchain in `go.mod`, the release
+image base in `Dockerfile`) are `fix:` commits, so they trigger a patch
+release, which then auto-merges as well. CI-only updates (GitHub Actions,
+VictoriaLogs for tests) don't release.
 
 ## License
 

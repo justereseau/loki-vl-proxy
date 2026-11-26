@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Dispatched by the release workflow on release-please PRs: PRs opened with
+  # the built-in token don't trigger `pull_request` workflows, but dispatched
+  # runs report their checks on the PR head commit (required for auto-merge).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -104,7 +108,7 @@ jobs:
           retention-days: 7
 
   # Multi-arch image assembled from the binaries above (no compilation in Docker).
-  # Pushed to ghcr.io for main; pull requests only build it.
+  # Pushed to ghcr.io for pushes to main; pull requests and dispatched runs only build it.
   image:
     needs: [test, logsql-syntax, e2e, build]
     runs-on: ubuntu-latest
@@ -124,7 +128,7 @@ jobs:
           done
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -141,6 +145,6 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

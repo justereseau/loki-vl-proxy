@@ -283,7 +283,7 @@ like Loki; please open an issue if it doesn't.
 ```bash
 make test     # unit tests
 make bench    # benchmarks
-make lint     # gofmt + go vet
+make lint     # golangci-lint, actionlint, zizmor (Docker)
 make e2e      # request set used by Grafana/Drilldown, against LOKI_VL_PROXY_E2E_URL
 make dist     # static binaries: dist/linux_amd64, dist/linux_arm64
 make docker   # multi-arch image from dist/ (needs a buildx builder with multi-platform support)
@@ -335,6 +335,23 @@ Release PRs are opened with the built-in token, which doesn't trigger
 every check is green, a **minor or patch** release PR merges itself and the
 release is published. Major versions and breaking changes wait for a manual
 merge.
+
+### Code quality and security checks
+
+Every pull request runs these checks; all of them are required on `main`:
+
+- **[golangci-lint](https://golangci-lint.run/)**
+  ([.golangci.yml](.golangci.yml)) runs staticcheck, errcheck, govet, gosec,
+  revive, gocritic, errorlint, bodyclose and misspell, and checks
+  gofmt/goimports formatting. Every `//nolint` carries a justification.
+- **[actionlint](https://github.com/rhysd/actionlint)** checks workflow syntax
+  and expressions, with shellcheck on `run:` scripts.
+- **[zizmor](https://docs.zizmor.sh/)** audits workflow security: permissions,
+  template injection, credential persistence and unpinned actions.
+
+[CodeQL](.github/workflows/codeql.yml) also analyzes the Go code and the
+workflows (`security-and-quality` queries) on pull requests, on `main` and
+weekly. Its results appear in the repository's **Security** tab.
 
 ### Dependency updates
 

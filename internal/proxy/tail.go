@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: SHA-1 is mandated by the WebSocket handshake (RFC 6455), not used for security
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -176,14 +176,14 @@ func wsAccept(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.ReadWrit
 	if err != nil {
 		return nil, nil, err
 	}
-	sum := sha1.Sum([]byte(key + wsGUID))
+	sum := sha1.Sum([]byte(key + wsGUID)) //nolint:gosec // G401: Sec-WebSocket-Accept is defined as base64(SHA-1(key + GUID)) by RFC 6455
 	_, err = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " +
 		base64.StdEncoding.EncodeToString(sum[:]) + "\r\n\r\n")
 	if err == nil {
 		err = brw.Flush()
 	}
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
 	return conn, brw, nil

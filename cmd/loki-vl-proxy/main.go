@@ -83,7 +83,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	srv := proxy.New(proxy.Config{
+	srv := proxy.New(&proxy.Config{
 		Upstream:              u,
 		QueryTimeout:          *queryTimeout,
 		LevelFields:           splitList(*levelFields),
@@ -109,6 +109,15 @@ func main() {
 		IdleTimeout:       *idleTimeout,
 		MaxHeaderBytes:    1 << 20,
 	}
+	logger.Info("starting loki-vl-proxy", "version", version, "listen", *listen, "upstream", u.Redacted())
+	if err := serve(hs); err != nil {
+		logger.Error("server failed", "err", err)
+		os.Exit(1)
+	}
+}
+
+// serve runs the HTTP server until SIGINT/SIGTERM, then shuts it down gracefully.
+func serve(hs *http.Server) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {
@@ -117,11 +126,10 @@ func main() {
 		defer cancel()
 		_ = hs.Shutdown(sctx)
 	}()
-	logger.Info("starting loki-vl-proxy", "version", version, "listen", *listen, "upstream", u.Redacted())
 	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error("server failed", "err", err)
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
 
 func splitList(s string) []string {

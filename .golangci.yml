@@ -1,0 +1,39 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - bodyclose      # HTTP response bodies are closed
+    - errorlint      # errors compared/wrapped with errors.Is/As and %w
+    - gocritic       # bug-prone and non-idiomatic constructs
+    - gosec          # security rules
+    - misspell
+    - nolintlint     # //nolint directives are specific and justified
+    - revive         # style (golint successor)
+    - unconvert      # unnecessary conversions
+    - usestdlibvars  # http.MethodGet & co. instead of literals
+  settings:
+    gocritic:
+      enabled-tags: [diagnostic, performance]
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # tests talk to fakes and test servers; error handling there is noise
+      - path: _test\.go
+        linters: [bodyclose, errcheck, gosec]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

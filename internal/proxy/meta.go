@@ -554,7 +554,7 @@ func (s *Server) handleDetectedLabels(w http.ResponseWriter, r *http.Request) er
 }
 
 func writeJSONValue(w http.ResponseWriter, v any) error {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	setJSONHeaders(w)
 	return json.NewEncoder(w).Encode(v)
 }
 
@@ -666,14 +666,12 @@ func (s *Server) handlePatterns(w http.ResponseWriter, r *http.Request) error {
 		writeJSON(w, []byte(`{"status":"success","data":[]}`))
 		return nil
 	}
-	pats := make([]string, 0, len(top.Data.Result))
 	quoted := make([]string, 0, len(top.Data.Result))
 	for _, res := range top.Data.Result {
 		p := res.Metric["_msg"]
 		if p == "" {
 			continue
 		}
-		pats = append(pats, p)
 		quoted = append(quoted, strconv.Quote(p))
 	}
 	// 2. their samples over time

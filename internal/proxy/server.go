@@ -65,7 +65,8 @@ type Server struct {
 }
 
 // New creates a Server.
-func New(cfg Config) *Server {
+func New(c *Config) *Server {
+	cfg := *c
 	if cfg.MaxLimit <= 0 {
 		cfg.MaxLimit = 5000
 	}
@@ -290,6 +291,12 @@ func putBuf(b *[]byte) {
 }
 
 func writeJSON(w http.ResponseWriter, body []byte) {
+	setJSONHeaders(w)
+	_, _ = w.Write(body) //nolint:gosec // G705: JSON API response with an explicit content type and nosniff, never rendered as HTML
+}
+
+// setJSONHeaders marks a response as JSON and forbids content sniffing.
+func setJSONHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(body)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 }

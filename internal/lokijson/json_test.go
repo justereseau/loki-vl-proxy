@@ -18,6 +18,11 @@ func TestScanObject(t *testing.T) {
 	if got := string(Unescape(nil, fs[0].Value)); got != `a "b" \ c` {
 		t.Fatalf("unescape: %q", got)
 	}
+	for raw, want := range map[string]string{`caf\u00e9`: "café", `\ud83d\ude00!`: "😀!", `bad \uZZZZ`: "bad uZZZZ", `\u003c13>`: "<13>"} {
+		if got := string(Unescape(nil, []byte(raw))); got != want {
+			t.Errorf("unescape %s: %q want %q", raw, got, want)
+		}
+	}
 	if _, err := ScanObject([]byte(`{"a":"b`), nil); err == nil {
 		t.Fatal("expected error")
 	}

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Justereseau/loki-vl-proxy/internal/lokijson"
@@ -66,7 +65,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, tenant tenan
 	defer putBuf(bp)
 	out := *bp
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	setJSONHeaders(w)
 	out = append(out, `{"status":"success","data":{"resultType":"streams",`...)
 	if q.categorize {
 		out = append(out, `"encodingFlags":["categorize-labels"],`...)
@@ -99,7 +98,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, tenant tenan
 			out = enc.appendEntry(out, line)
 		}
 		if len(out) >= flushThreshold {
-			if _, werr := w.Write(out); werr != nil {
+			if _, werr := w.Write(out); werr != nil { //nolint:gosec // G705: streamed JSON with an explicit content type and nosniff, never rendered as HTML
 				*bp = out[:0]
 				return errClientGone
 			}
@@ -126,7 +125,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, tenant tenan
 	out = append(out, `],`...)
 	out = appendStats(out, time.Since(began), enc.count)
 	out = append(out, '}', '}')
-	_, _ = w.Write(out)
+	_, _ = w.Write(out) //nolint:gosec // G705: streamed JSON with an explicit content type and nosniff, never rendered as HTML
 	*bp = out[:0]
 	return nil
 }
@@ -281,25 +280,25 @@ func (e *streamEncoder) appendEntry(out, line []byte) []byte {
 	if e.fromFields {
 		// the pipeline may have dropped, kept or renamed stream labels: use
 		// the stream label fields that are still present in the entry
-		labels = append(e.fieldLbls[:0], '{')
+		e.fieldLbls = append(e.fieldLbls[:0], '{')
 		n := 0
 		for _, name := range e.streamNames {
 			for i := range e.fields {
 				f := &e.fields[i]
 				if len(f.Value) > 0 && bytes.Equal(f.Key, name) {
 					if n > 0 {
-						labels = append(labels, ',')
+						e.fieldLbls = append(e.fieldLbls, ',')
 					}
 					n++
-					labels = lokijson.AppendSanitizedName(labels, name)
-					labels = append(labels, ':')
-					labels = appendValue(labels, f)
+					e.fieldLbls = lokijson.AppendSanitizedName(e.fieldLbls, name)
+					e.fieldLbls = append(e.fieldLbls, ':')
+					e.fieldLbls = appendValue(e.fieldLbls, f)
 					break
 				}
 			}
 		}
-		labels = append(labels, '}')
-		e.fieldLbls = labels
+		e.fieldLbls = append(e.fieldLbls, '}')
+		labels = e.fieldLbls
 	}
 	for i := range e.fields {
 		f := &e.fields[i]
@@ -335,15 +334,15 @@ func (e *streamEncoder) appendEntry(out, line []byte) []byte {
 		}
 	} else {
 		// all labels on the stream: merge stream labels and metadata
-		key := append(e.nextKey[:0], labels[:len(labels)-1]...)
+		e.nextKey = append(e.nextKey[:0], labels[:len(labels)-1]...)
 		if nmeta > 0 {
-			if len(key) > 1 {
-				key = append(key, ',')
+			if len(e.nextKey) > 1 {
+				e.nextKey = append(e.nextKey, ',')
 			}
-			key = append(key, meta...)
+			e.nextKey = append(e.nextKey, meta...)
 		}
-		key = append(key, '}')
-		e.nextKey = key
+		e.nextKey = append(e.nextKey, '}')
+		key := e.nextKey
 		if !e.open || !bytes.Equal(key, e.entryKey) {
 			e.entryKey = append(e.entryKey[:0], key...)
 			out = e.openStream(out, key)
@@ -409,19 +408,4 @@ func (e *streamEncoder) finish(out []byte) []byte {
 		out = append(out, ']', '}')
 	}
 	return out
-}
-
-// clampLimit applies Loki's default (100) and the configured maximum.
-func (s *Server) clampLimit(v string) (int, error) {
-	if v == "" {
-		return 100, nil
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil || n < 0 {
-		return 0, httpError(http.StatusBadRequest, "invalid limit %q", v)
-	}
-	if n == 0 || n > s.cfg.MaxLimit {
-		n = s.cfg.MaxLimit
-	}
-	return n, nil
 }

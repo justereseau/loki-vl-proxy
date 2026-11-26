@@ -152,7 +152,7 @@ func (b *builder) logExpr(e *logql.LogExpr, o *Options) error {
 		b.filters = append(b.filters, s)
 	}
 	for _, st := range e.Stages {
-		if ps, ok := st.(*logql.ParserStage); ok && !(o.IgnoreParsers && isUnpackParser(ps.Kind)) {
+		if ps, ok := st.(*logql.ParserStage); ok && (!o.IgnoreParsers || !isUnpackParser(ps.Kind)) {
 			b.parsersLeft++
 		}
 	}
@@ -197,7 +197,7 @@ func (b *builder) stage(st logql.Stage, o *Options) error {
 		}
 		b.addFilter(f, !b.msgChanged)
 	case *logql.LabelFilterStage:
-		f := labelFilter(s.Filter, o, true)
+		f := labelFilter(s.Filter, o)
 		if f == "" {
 			return nil
 		}
@@ -247,7 +247,7 @@ func (b *builder) stage(st logql.Stage, o *Options) error {
 			}
 			changed = true
 			if it.Matcher != nil {
-				cond := labelFilter(it.Matcher, o, true)
+				cond := labelFilter(it.Matcher, o)
 				b.pipes = append(b.pipes, "format if ("+cond+") \"\" as "+fieldName(o.Field(it.Name)))
 				continue
 			}
@@ -269,7 +269,7 @@ func (b *builder) stage(st logql.Stage, o *Options) error {
 			f := fieldName(o.Field(it.Name))
 			if it.Matcher != nil {
 				// keep name="value": the label is kept only when it matches
-				b.pipes = append(b.pipes, "format if (!("+labelFilter(it.Matcher, o, true)+")) \"\" as "+f)
+				b.pipes = append(b.pipes, "format if (!("+labelFilter(it.Matcher, o)+")) \"\" as "+f)
 			}
 			names = append(names, f)
 		}
@@ -293,7 +293,7 @@ func (b *builder) parser(s *logql.ParserStage, o *Options) error {
 	if err := b.parserPipes(s, o); err != nil {
 		return err
 	}
-	if !(o.IgnoreParsers && isUnpackParser(s.Kind)) {
+	if !o.IgnoreParsers || !isUnpackParser(s.Kind) {
 		b.parsersLeft--
 		if b.parsersLeft == 0 {
 			for _, f := range b.deferred {
@@ -503,7 +503,7 @@ func isPlaceholderName(s string) bool {
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (i > 0 && c >= '0' && c <= '9')) {
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (i == 0 || c < '0' || c > '9') {
 			return false
 		}
 	}
@@ -525,12 +525,12 @@ func regexpQuote(s string) string {
 	return sb.String()
 }
 
-// labelFilter renders a label filter expression. top=false wraps OR groups in parens.
-func labelFilter(f logql.LabelFilter, o *Options, top bool) string {
+// labelFilter renders a label filter expression; OR groups are parenthesized.
+func labelFilter(f logql.LabelFilter, o *Options) string {
 	switch x := f.(type) {
 	case *logql.LabelBinary:
-		l := labelFilter(x.L, o, false)
-		r := labelFilter(x.R, o, false)
+		l := labelFilter(x.L, o)
+		r := labelFilter(x.R, o)
 		if x.Or {
 			if l == "" || r == "" { // one side matches everything
 				return ""
@@ -716,7 +716,7 @@ func isPlainName(n string) bool {
 	}
 	for i := 0; i < len(n); i++ {
 		c := n[i]
-		if !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (i > 0 && (c == '.' || (c >= '0' && c <= '9')))) {
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (i == 0 || (c != '.' && (c < '0' || c > '9'))) {
 			return false
 		}
 	}

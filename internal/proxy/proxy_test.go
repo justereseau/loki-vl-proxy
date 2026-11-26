@@ -49,7 +49,7 @@ func newTestServer(t *testing.T, responses map[string]string) (*Server, *fakeVL)
 	}
 	f := &fakeVL{responses: responses}
 	u, _ := url.Parse("http://vl:9428/vl")
-	s := New(Config{
+	s := New(&Config{
 		Upstream:        u,
 		Transport:       f,
 		LevelFields:     []string{"level"},

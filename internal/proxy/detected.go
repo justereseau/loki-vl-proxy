@@ -23,7 +23,6 @@ type fieldStat struct {
 	overflow bool
 	// type candidates, cleared as soon as a value does not match
 	isInt, isFloat, isDuration, isBytes, isBool bool
-	native                                      bool
 	json                                        bool // seen on a line that looks like JSON
 }
 

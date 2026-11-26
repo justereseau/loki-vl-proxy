@@ -26,11 +26,11 @@ type nameCache struct {
 }
 
 type tenantNames struct {
-	mu      sync.RWMutex
-	m       map[string]string
-	native  map[string]bool // fields stored natively (seen without pipes)
-	loaded  time.Time
-	loading sync.Mutex
+	mu       sync.RWMutex
+	m        map[string]string
+	native   map[string]bool // fields stored natively (seen without pipes)
+	loaded   time.Time
+	inflight chan struct{} // closed when the running refresh completes
 }
 
 func newNameCache(ttl time.Duration, fetch func(context.Context, tenantID) ([]string, error)) *nameCache {
@@ -62,7 +62,7 @@ func (c *nameCache) resolve(ctx context.Context, t tenantID, name string) string
 	tn.mu.RUnlock()
 	if ok {
 		if time.Since(loaded) > c.ttl {
-			go c.refresh(t, tn)
+			go c.refresh(t, tn) //nolint:gosec // G118: background refresh must outlive the request that noticed the stale cache
 		}
 		return v
 	}
@@ -85,21 +85,34 @@ func (c *nameCache) refresh(t tenantID, tn *tenantNames) {
 	c.refreshCtx(ctx, t, tn, false)
 }
 
+// refreshCtx reloads the field names of a tenant. Concurrent callers share a
+// single upstream request; with wait they block until it completes.
 func (c *nameCache) refreshCtx(ctx context.Context, t tenantID, tn *tenantNames, wait bool) {
-	if !tn.loading.TryLock() {
-		if wait { // another refresh is running; wait for it
-			tn.loading.Lock()
-			tn.loading.Unlock()
+	tn.mu.Lock()
+	if ch := tn.inflight; ch != nil {
+		tn.mu.Unlock()
+		if wait {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+			}
 		}
 		return
 	}
-	defer tn.loading.Unlock()
-	tn.mu.RLock()
-	fresh := time.Since(tn.loaded) <= c.ttl/10
-	tn.mu.RUnlock()
-	if fresh {
+	if time.Since(tn.loaded) <= c.ttl/10 {
+		tn.mu.Unlock()
 		return
 	}
+	ch := make(chan struct{})
+	tn.inflight = ch
+	tn.mu.Unlock()
+	defer func() {
+		tn.mu.Lock()
+		tn.inflight = nil
+		tn.mu.Unlock()
+		close(ch)
+	}()
+
 	names, err := c.fetch(ctx, t)
 	tn.mu.Lock()
 	tn.loaded = time.Now() // also on error, to rate-limit retries
@@ -133,7 +146,7 @@ func (c *nameCache) isNative(ctx context.Context, t tenantID, field string) bool
 		n, ok = len(tn.native), tn.native[field]
 		tn.mu.RUnlock()
 	} else if time.Since(loaded) > c.ttl {
-		go c.refresh(t, tn)
+		go c.refresh(t, tn) //nolint:gosec // G118: background refresh must outlive the request that noticed the stale cache
 	}
 	return ok || n == 0
 }

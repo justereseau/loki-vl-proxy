@@ -22,6 +22,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write # dispatch CI on the release PR
     outputs:
       created: ${{ steps.rp.outputs.release_created }}
       tag: ${{ steps.rp.outputs.tag_name }}
@@ -32,6 +33,18 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # Release PRs are opened with the built-in token, which doesn't trigger
+      # `pull_request` workflows. Dispatch CI on the release branch so the
+      # required checks report on the PR and auto-merge can proceed.
+      - name: Run CI on the release PR
+        if: steps.rp.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.rp.outputs.pr }}
+        run: |
+          branch=$(jq -r .headBranchName <<<"$PR")
+          echo "dispatching CI on $branch"
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
 
   verify:
     needs: release-please

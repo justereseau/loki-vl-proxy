@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  VICTORIALOGS_VERSION: v1.54.0
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - name: Benchmarks (smoke)
+        run: go test -run XXX -bench . -benchtime 2000x -benchmem ./internal/...
+
+  # Every LogsQL query produced by the translator tests is parsed by the real
+  # VictoriaLogs parser, so syntax drift is caught early.
+  logsql-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: VictoriaMetrics/VictoriaLogs
+          ref: ${{ env.VICTORIALOGS_VERSION }}
+          path: _victorialogs
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: _victorialogs/go.mod
+      - name: Build vlcheck against VictoriaLogs ${{ env.VICTORIALOGS_VERSION }}
+        run: |
+          mkdir -p _victorialogs/app/vlcheck
+          sed '1d' tools/vlcheck/main.go > _victorialogs/app/vlcheck/main.go
+          cd _victorialogs && CGO_ENABLED=0 go build -mod=vendor -o ../vlcheck ./app/vlcheck
+      - name: Validate generated LogsQL
+        run: |
+          TRANSLATE_DUMP=$PWD/queries.tsv go test -count=1 ./internal/translate/
+          ./vlcheck < queries.tsv
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      victorialogs:
+        image: victoriametrics/victoria-logs:v1.54.0
+        ports: ["9428:9428"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Ingest sample logs
+        run: |
+          until curl -sf http://localhost:9428/health; do sleep 1; done
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          for i in $(seq 1 200); do
+            lvl=info; [ $((i % 5)) -eq 0 ] && lvl=error
+            printf '{"_time":"%s","_msg":"level=%s msg=\\"request %s\\" took=%sms","service.name":"svc-%s","k8s.pod.name":"pod-%s","level":"%s"}\n' \
+              "$now" "$lvl" "$i" "$((i % 90))" "$((i % 3))" "$((i % 5))" "$lvl"
+          done | curl -sf -H 'Content-Type: application/stream+json' --data-binary @- 'http://localhost:9428/insert/jsonline?_stream_fields=service.name,k8s.pod.name'
+          sleep 3
+      - name: Grafana / Logs Drilldown request set
+        env:
+          LOKI_VL_PROXY_E2E_URL: http://localhost:9428
+        run: go test -count=1 -run E2E -v ./internal/proxy/
+
+  docker:
+    needs: [test, logsql-syntax, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

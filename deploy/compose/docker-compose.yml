@@ -1,0 +1,45 @@
+# Manual verification stack: VictoriaLogs + sample log generator + loki-vl-proxy + Grafana.
+#
+#   docker compose -f deploy/compose/docker-compose.yml up -d --build
+#   open http://localhost:3000/a/grafana-lokiexplore-app/explore   (Logs Drilldown)
+#
+# To point the proxy at an existing VictoriaLogs instead of the bundled one:
+#   VL_URL=https://victorialogs.example.com docker compose -f deploy/compose/docker-compose.yml up -d --build loki-vl-proxy grafana
+name: loki-vl-proxy
+
+services:
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.54.0
+    command: ["-storageDataPath=/vlogs", "-retentionPeriod=7d"]
+    ports: ["9428:9428"]
+    volumes: [vlogs:/vlogs]
+
+  log-generator:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["/bin/sh", "/generator/generate.sh"]
+    environment:
+      VL_URL: http://victorialogs:9428
+    volumes: ["./generator:/generator:ro"]
+    depends_on: [victorialogs]
+
+  loki-vl-proxy:
+    build:
+      context: ../..
+    environment:
+      LOKI_VL_PROXY_UPSTREAM: ${VL_URL:-http://victorialogs:9428}
+      LOKI_VL_PROXY_LOG_LEVEL: info
+    ports: ["3100:3100"]
+    depends_on: [victorialogs]
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    ports: ["3000:3000"]
+    volumes: ["./grafana/provisioning:/etc/grafana/provisioning:ro"]
+    depends_on: [loki-vl-proxy]
+
+volumes:
+  vlogs: {}

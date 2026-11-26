@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version-file: go.mod
@@ -30,14 +32,55 @@ jobs:
       - name: Benchmarks (smoke)
         run: go test -run XXX -bench . -benchtime 2000x -benchmem ./internal/...
 
+  # Go linters: staticcheck, errcheck, gosec, revive, gocritic... (.golangci.yml)
+  golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+
+  # Workflow correctness: syntax, expressions, and shellcheck on run: scripts.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: -color
+
+  # Workflow security: permissions, template injection, credential leaks...
+  zizmor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@1b4550e929643b8b26a62303c6bd64814271a4f1 # v0.9.2
+        with:
+          version: 1.33.1
+          advanced-security: false
+          annotations: true
+
   # Every LogsQL query produced by the translator tests is parsed by the real
   # VictoriaLogs parser, so syntax drift is caught early.
   logsql-syntax:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           repository: VictoriaMetrics/VictoriaLogs
           ref: ${{ env.VICTORIALOGS_VERSION }}
           path: _victorialogs
@@ -62,6 +105,8 @@ jobs:
         ports: ["9428:9428"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version-file: go.mod
@@ -88,6 +133,8 @@ jobs:
         arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version-file: go.mod
@@ -117,6 +164,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: loki-vl-proxy-linux-*
@@ -154,7 +203,7 @@ jobs:
   # human). The built-in token's merge does not trigger push workflows, so the
   # Release workflow is dispatched explicitly to publish the release.
   release-automerge:
-    needs: [test, logsql-syntax, e2e, build, image]
+    needs: [test, golangci-lint, actionlint, zizmor, logsql-syntax, e2e, build, image]
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--main')
     runs-on: ubuntu-latest
     permissions:

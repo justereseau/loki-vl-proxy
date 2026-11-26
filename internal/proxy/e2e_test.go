@@ -44,7 +44,7 @@ func TestE2E(t *testing.T) {
 		tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 		cfg.Transport = tr
 	}
-	s := New(cfg)
+	s := New(&cfg)
 	end := time.Now()
 	start := end.Add(-30 * time.Minute)
 	se := "&start=" + strconv.FormatInt(start.UnixNano(), 10) + "&end=" + strconv.FormatInt(end.UnixNano(), 10)

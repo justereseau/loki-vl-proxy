@@ -129,11 +129,11 @@ func (s *Server) convertSeries(tenant tenantID, resp *promResponse, mq *translat
 		// VictoriaLogs reports NaN for buckets without numeric values; Loki
 		// simply has no sample there.
 		if res.Value != nil && !math.IsNaN(res.Value.v) {
-			sr.pts = append(sr.pts, point{res.Value.t, res.Value.v})
+			sr.pts = append(sr.pts, point(*res.Value))
 		}
 		for _, sp := range res.Values {
 			if !math.IsNaN(sp.v) {
-				sr.pts = append(sr.pts, point{sp.t, sp.v})
+				sr.pts = append(sr.pts, point(sp))
 			}
 		}
 	}
@@ -255,7 +255,7 @@ func applyPost(series []*mseries, ops []translate.PostOp, windowSec float64, g g
 				sr.pts = pts
 			}
 		case translate.PostTopK:
-			series = topK(series, op)
+			series = topK(series, &op)
 		case translate.PostSort:
 			if instant {
 				sort.SliceStable(series, func(a, b int) bool {
@@ -417,7 +417,7 @@ func firstValue(sr *mseries) float64 {
 }
 
 // topK keeps, for every timestamp (and group), the k largest (or smallest) samples.
-func topK(series []*mseries, op translate.PostOp) []*mseries {
+func topK(series []*mseries, op *translate.PostOp) []*mseries {
 	type cand struct {
 		s int
 		p int

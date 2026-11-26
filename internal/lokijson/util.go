@@ -165,8 +165,7 @@ func AppendUnixSeconds(dst []byte, ms int64) []byte {
 		if r < 0 {
 			r = -r
 		}
-		dst = append(dst, '.')
-		dst = append(dst, byte('0'+r/100), byte('0'+(r/10)%10), byte('0'+r%10))
+		dst = append(dst, '.', byte('0'+r/100), byte('0'+(r/10)%10), byte('0'+r%10))
 		for dst[len(dst)-1] == '0' {
 			dst = dst[:len(dst)-1]
 		}

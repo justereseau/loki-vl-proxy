@@ -5,7 +5,6 @@ package lokijson
 
 import (
 	"errors"
-	"strconv"
 	"unicode/utf8"
 )
 
@@ -67,18 +66,19 @@ func ScanObject(line []byte, dst []Field) ([]Field, error) {
 		// non-string scalar (VictoriaLogs only emits strings, but be lenient)
 		s := i
 		depth := 0
+	scan:
 		for i < len(line) {
-			c := line[i]
-			if c == '{' || c == '[' {
+			switch c := line[i]; {
+			case c == '{' || c == '[':
 				depth++
-			} else if c == '}' || c == ']' {
+			case c == '}' || c == ']':
 				if depth == 0 {
-					break
+					break scan
 				}
 				depth--
-			} else if c == ',' && depth == 0 {
-				break
-			} else if c == '"' {
+			case c == ',' && depth == 0:
+				break scan
+			case c == '"':
 				e := stringEnd(line, i+1)
 				if e < 0 {
 					return dst, errBadJSON
@@ -155,13 +155,12 @@ func Unescape(dst, raw []byte) []byte {
 			dst = append(dst, '\f')
 		case 'u':
 			if i+4 < len(raw) {
-				r, err := strconv.ParseUint(string(raw[i+1:i+5]), 16, 32)
-				if err == nil {
+				if ru, ok := hex4(raw[i+1 : i+5]); ok {
 					i += 4
-					ru := rune(r)
+					// UTF-16 surrogate pair: \uD83D\uDE00
 					if ru >= 0xD800 && ru < 0xDC00 && i+6 < len(raw) && raw[i+1] == '\\' && raw[i+2] == 'u' {
-						if r2, err := strconv.ParseUint(string(raw[i+3:i+7]), 16, 32); err == nil {
-							ru = (ru-0xD800)<<10 + (rune(r2) - 0xDC00) + 0x10000
+						if lo, ok := hex4(raw[i+3 : i+7]); ok && lo >= 0xDC00 && lo < 0xE000 {
+							ru = (ru-0xD800)<<10 + (lo - 0xDC00) + 0x10000
 							i += 6
 						}
 					}
@@ -229,7 +228,7 @@ func LabelNameOK(s string) bool {
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (i > 0 && c >= '0' && c <= '9')) {
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (i == 0 || c < '0' || c > '9') {
 			return false
 		}
 	}
@@ -276,4 +275,23 @@ func AppendSanitizedName(dst, rawKey []byte) []byte {
 		}
 	}
 	return append(dst, '"')
+}
+
+// hex4 decodes the 4 hexadecimal digits of a \\uXXXX escape.
+func hex4(b []byte) (rune, bool) {
+	var r rune
+	for _, c := range b {
+		r <<= 4
+		switch {
+		case c >= '0' && c <= '9':
+			r |= rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			r |= rune(c - 'a' + 10)
+		case c >= 'A' && c <= 'F':
+			r |= rune(c - 'A' + 10)
+		default:
+			return 0, false
+		}
+	}
+	return r, true
 }

@@ -3,6 +3,10 @@ IMAGE   ?= ghcr.io/justereseau/loki-vl-proxy
 ARCHES  := amd64 arm64
 LDFLAGS := -s -w -X main.version=$(VERSION)
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml
+# same versions as .github/workflows/ci.yml
+GOLANGCI_LINT_VERSION := v2.15.0
+ACTIONLINT_VERSION    := 1.7.12
+ZIZMOR_VERSION        := 1.33.1
 
 .PHONY: build dist test race bench lint e2e docker compose-up compose-down clean
 
@@ -27,9 +31,11 @@ race:
 bench:
 	go test -run XXX -bench . -benchmem ./internal/...
 
+# golangci-lint, actionlint and zizmor, as in CI (needs Docker only).
 lint:
-	@test -z "$$(gofmt -l .)" || (gofmt -l . && exit 1)
-	go vet ./...
+	docker run --rm -v "$(CURDIR)":/app -w /app golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint run ./...
+	docker run --rm -v "$(CURDIR)":/repo -w /repo rhysd/actionlint:$(ACTIONLINT_VERSION) -color
+	docker run --rm -v "$(CURDIR)":/repo -w /repo ghcr.io/zizmorcore/zizmor:$(ZIZMOR_VERSION) --offline .github/workflows
 
 # Runs the Grafana / Logs Drilldown request set against a real VictoriaLogs.
 e2e:

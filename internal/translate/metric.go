@@ -233,7 +233,7 @@ func planRange(r *logql.RangeAgg, o *Options) (*plan, error) {
 				return nil, fmt.Errorf("only label filters are allowed after unwrap")
 			}
 			// filters after unwrap never move before the unwrap point
-			if f := labelFilter(lf.Filter, o, true); f != "" {
+			if f := labelFilter(lf.Filter, o); f != "" {
 				b.pipes = append(b.pipes, "filter "+f)
 			}
 		}

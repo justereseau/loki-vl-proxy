@@ -327,6 +327,12 @@ Releases are fully automated with
 Every push to `main` also publishes `ghcr.io/justereseau/loki-vl-proxy:main`
 and `:sha-<commit>` from the CI binaries.
 
+`main` requires the CI checks (`test`, `logsql-syntax`, `e2e`, `build (amd64)`,
+`build (arm64)`, `image`), so pull requests, release PRs included, can use
+GitHub's **auto-merge**. Release PRs are opened with the built-in token, which
+doesn't trigger `pull_request` workflows, so the release workflow dispatches CI
+on them.
+
 ## License
 
 Apache License 2.0.

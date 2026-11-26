@@ -16,7 +16,7 @@ Grafana (Loki data source, Logs Drilldown) ──Loki API──▶ loki-vl-proxy
   logs, labels, fields, levels and patterns.
 - Streams log responses: memory stays constant whatever the result size.
 - Single static binary with no dependencies beyond the Go standard library;
-  distroless image.
+  `FROM scratch` image (binary, CA certificates and a non-root user only).
 
 ## Why Go
 
@@ -33,7 +33,7 @@ allocation-free:
 | scan a VictoriaLogs JSON line | 186 ns | 0 |
 | convert a line into a Loki stream entry | 340 ns (~780 MB/s) | 0 |
 
-The container image is 9 MB, and the proxy idles at ~2.5 MiB RSS.
+The container image is 7.5 MB (`scratch`, binary and CA certificates only), and the proxy idles at ~2.5 MiB RSS.
 
 Efficiency choices:
 

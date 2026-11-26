@@ -11,8 +11,9 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/loki-vl-proxy ./cmd/loki-vl-proxy
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/loki-vl-proxy /loki-vl-proxy
 EXPOSE 3100
-USER nonroot:nonroot
+USER 65532:65532
 ENTRYPOINT ["/loki-vl-proxy"]

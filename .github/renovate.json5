@@ -1,0 +1,75 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    // recommended defaults + supply-chain hardening: GitHub Actions and
+    // Docker images pinned to digests, config migration, abandonment checks
+    'config:best-practices',
+    // Conventional Commits: release-please reads them to cut releases
+    ':semanticCommits',
+  ],
+  labels: ['dependencies'],
+  // dependency updates that are known-vulnerable are raised immediately
+  osvVulnerabilityAlerts: true,
+  vulnerabilityAlerts: {
+    labels: ['security'],
+  },
+  postUpdateOptions: ['gomodTidy'],
+  // let new versions settle before they are proposed (and auto-merged)
+  minimumReleaseAge: '3 days',
+  internalChecksFilter: 'strict',
+  // GitHub auto-merge: merges once the required checks of `main` are green
+  platformAutomerge: true,
+
+  customManagers: [
+    {
+      // VictoriaLogs version used by CI to validate LogsQL syntax
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/ci\\.yml$/'],
+      matchStrings: ['VICTORIALOGS_VERSION: (?<currentValue>v\\d+\\.\\d+\\.\\d+)'],
+      datasourceTemplate: 'docker',
+      depNameTemplate: 'victoriametrics/victoria-logs',
+    },
+  ],
+
+  packageRules: [
+    {
+      description: 'Auto-merge minor, patch and digest updates once CI is green',
+      matchUpdateTypes: ['minor', 'patch', 'pin', 'pinDigest', 'digest'],
+      automerge: true,
+    },
+    {
+      description: 'Major updates need a human review',
+      matchUpdateTypes: ['major'],
+      automerge: false,
+      labels: ['dependencies', 'major'],
+    },
+    {
+      description: 'Changes to what ships (Go toolchain, release image base) are fixes: they trigger a patch release',
+      matchFileNames: ['go.mod', 'Dockerfile'],
+      semanticCommitType: 'fix',
+    },
+    {
+      description: 'CI-only updates do not release',
+      matchManagers: ['github-actions'],
+      semanticCommitType: 'ci',
+    },
+    {
+      description: 'Release image base: weekly, to avoid a release per daily digest',
+      matchFileNames: ['Dockerfile'],
+      matchUpdateTypes: ['digest', 'pinDigest'],
+      schedule: ['before 6am on monday'],
+    },
+    {
+      description: 'Move VictoriaLogs together (CI service, LogsQL validation, compose stack)',
+      matchDepNames: ['victoriametrics/victoria-logs'],
+      groupName: 'VictoriaLogs',
+    },
+    {
+      description: 'GitHub Actions in one weekly PR',
+      matchManagers: ['github-actions'],
+      matchUpdateTypes: ['minor', 'patch', 'digest', 'pinDigest'],
+      groupName: 'GitHub Actions',
+      schedule: ['before 6am on monday'],
+    },
+  ],
+}

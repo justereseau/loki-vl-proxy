@@ -9,6 +9,8 @@ name: Release
 on:
   push:
     branches: [main]
+  # dispatched after a release PR is auto-merged (see ci.yml release-automerge)
+  workflow_dispatch:
 
 permissions: {}
 

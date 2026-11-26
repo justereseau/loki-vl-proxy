@@ -16,7 +16,7 @@ Grafana (Loki data source, Logs Drilldown) ──Loki API──▶ loki-vl-proxy
   logs, labels, fields, levels and patterns.
 - Streams log responses: memory stays constant whatever the result size.
 - Single static binary with no dependencies beyond the Go standard library;
-  distroless image.
+  `FROM scratch` image (binary, CA certificates and a non-root user only).
 
 ## Why Go
 
@@ -33,7 +33,7 @@ allocation-free:
 | scan a VictoriaLogs JSON line | 186 ns | 0 |
 | convert a line into a Loki stream entry | 340 ns (~780 MB/s) | 0 |
 
-The container image is 9 MB, and the proxy idles at ~2.5 MiB RSS.
+The container image is 7.5 MB (`scratch`, binary and CA certificates only), and the proxy idles at ~2.5 MiB RSS.
 
 Efficiency choices:
 
@@ -68,10 +68,18 @@ To use an existing VictoriaLogs instead:
 VL_URL=https://victorialogs.example.com docker compose -f deploy/compose/docker-compose.yml up -d --build loki-vl-proxy grafana
 ```
 
-Standalone:
+Standalone, with the multi-arch image (linux/amd64, linux/arm64):
 
 ```bash
-docker run -p 3100:3100 ghcr.io/justereseau/loki-vl-proxy -upstream http://victorialogs:9428
+docker run -p 3100:3100 ghcr.io/justereseau/loki-vl-proxy:latest -upstream http://victorialogs:9428
+```
+
+Or with a static binary from the [releases](https://github.com/justereseau/loki-vl-proxy/releases)
+(Linux amd64 and arm64):
+
+```bash
+tar xzf loki-vl-proxy_<version>_linux_amd64.tar.gz
+./loki-vl-proxy_<version>_linux_amd64/loki-vl-proxy -upstream http://localhost:9428
 ```
 
 In Grafana, add a **Loki** data source with URL `http://loki-vl-proxy:3100`.
@@ -277,11 +285,47 @@ make test     # unit tests
 make bench    # benchmarks
 make lint     # gofmt + go vet
 make e2e      # request set used by Grafana/Drilldown, against LOKI_VL_PROXY_E2E_URL
+make dist     # static binaries: dist/linux_amd64, dist/linux_arm64
+make docker   # multi-arch image from dist/ (needs a buildx builder with multi-platform support)
 ```
+
+The release image ([Dockerfile](Dockerfile)) contains no compiler step: it
+packages the `dist/linux_<arch>/loki-vl-proxy` binaries built by the pipeline.
+The compose stack builds from source with
+[deploy/compose/Dockerfile](deploy/compose/Dockerfile).
 
 `TRANSLATE_DUMP=queries.tsv go test ./internal/translate/` dumps every
 generated LogsQL query. CI parses them with the VictoriaLogs parser built from
 `tools/vlcheck`.
+
+## Releases
+
+Releases are fully automated with
+[release-please](https://github.com/googleapis/release-please) and follow
+[Conventional Commits](https://www.conventionalcommits.org/):
+
+- `fix:` makes a patch release, and `feat:` a minor one.
+- A breaking change (`!` or `BREAKING CHANGE:`) bumps the minor version while
+  below 1.0.
+- `chore:`, `ci:`, `docs:` and similar types don't release.
+
+1. Every push to `main` updates a release PR with the next version and the
+   `CHANGELOG.md` entry.
+2. Merging that PR creates a draft GitHub release and its `vX.Y.Z` tag.
+3. The [release workflow](.github/workflows/release.yml) then:
+   1. runs the tests at the tag;
+   2. builds the static Linux binaries (amd64, arm64);
+   3. pushes the multi-arch image `ghcr.io/justereseau/loki-vl-proxy`, tagged
+      `X.Y.Z`, `X.Y`, `X` (from 1.0) and `latest`, built from those same
+      binaries;
+   4. attaches `loki-vl-proxy_<version>_linux_<arch>.tar.gz` and
+      `loki-vl-proxy_<version>_checksums.txt`;
+   5. publishes the release.
+4. The repository has [immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
+   enabled, so a published release (its tag and assets) can't be changed.
+
+Every push to `main` also publishes `ghcr.io/justereseau/loki-vl-proxy:main`
+and `:sha-<commit>` from the CI binaries.
 
 ## License
 

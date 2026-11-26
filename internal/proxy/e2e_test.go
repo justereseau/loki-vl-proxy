@@ -109,7 +109,9 @@ func TestE2E(t *testing.T) {
 	t.Run("step_grid_alignment", func(t *testing.T) {
 		// start deliberately not aligned to the step: Loki evaluates at start + k*step
 		st := start.Truncate(time.Minute).Add(17 * time.Second)
-		body := call(t, "/loki/api/v1/query_range?step=60s&start="+strconv.FormatInt(st.UnixNano(), 10)+"&end="+strconv.FormatInt(end.UnixNano(), 10)+
+		// end is extended so that a grid point follows the most recent logs
+		// (CI ingests all its sample data just before the test runs)
+		body := call(t, "/loki/api/v1/query_range?step=60s&start="+strconv.FormatInt(st.UnixNano(), 10)+"&end="+strconv.FormatInt(end.Add(2*time.Minute).UnixNano(), 10)+
 			"&query="+q(`sum(count_over_time(`+sel+` [1m]))`), nil)
 		var resp struct {
 			Data struct {

@@ -1,0 +1,162 @@
+name: Release
+
+# release-please keeps a release PR up to date from Conventional Commits.
+# Merging it creates a *draft* GitHub release and its tag. This workflow then
+# builds the Linux binaries, pushes the multi-arch image built from them,
+# attaches the archives and checksums, and publishes the release. With
+# immutable releases enabled on the repository, the published release (tag and
+# assets) can no longer be modified.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+      version: ${{ steps.rp.outputs.version }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  verify:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  build:
+    needs: [release-please, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      VERSION: ${{ needs.release-please.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build linux/${{ matrix.arch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=v${VERSION}" \
+            -o dist/linux_${{ matrix.arch }}/loki-vl-proxy ./cmd/loki-vl-proxy
+          file dist/linux_${{ matrix.arch }}/loki-vl-proxy
+      - name: Package
+        run: |
+          name=loki-vl-proxy_${VERSION}_linux_${{ matrix.arch }}
+          mkdir -p "pkg/$name"
+          cp dist/linux_${{ matrix.arch }}/loki-vl-proxy LICENSE README.md "pkg/$name/"
+          tar -C pkg -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: |
+            dist/linux_${{ matrix.arch }}/loki-vl-proxy
+            loki-vl-proxy_*_linux_${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [release-please, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      TAG: ${{ needs.release-please.outputs.tag }}
+      VERSION: ${{ needs.release-please.outputs.version }}
+      IMAGE: ghcr.io/${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-linux-*
+          path: artifacts
+          merge-multiple: true
+      - name: Lay out binaries and checksums
+        run: |
+          for arch in amd64 arm64; do
+            install -D -m 0755 artifacts/dist/linux_$arch/loki-vl-proxy dist/linux_$arch/loki-vl-proxy
+          done
+          mkdir assets
+          cp artifacts/loki-vl-proxy_*.tar.gz assets/
+          (cd assets && sha256sum *.tar.gz > "loki-vl-proxy_${VERSION}_checksums.txt")
+          cat assets/*_checksums.txt
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }}
+            type=semver,pattern={{major}},value=${{ env.TAG }}
+            type=raw,value=latest
+      - id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Attach assets and image reference to the draft release
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          gh release upload "$TAG" assets/* --clobber
+          gh release view "$TAG" --json body -q .body > notes.md
+          {
+            echo
+            echo "### Container image"
+            echo
+            echo '```'
+            echo "docker pull ${IMAGE}:${VERSION}"
+            echo '```'
+            echo
+            echo "Platforms: linux/amd64, linux/arm64. Digest: \`${DIGEST}\`"
+          } >> notes.md
+          gh release edit "$TAG" --notes-file notes.md
+      - name: Publish the release (immutable once published)
+        run: gh release edit "$TAG" --draft=false --latest

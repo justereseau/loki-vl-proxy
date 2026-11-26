@@ -12,7 +12,7 @@ services:
     image: victoriametrics/victoria-logs:v1.54.0
     command: ["-storageDataPath=/vlogs", "-retentionPeriod=7d"]
     ports: ["9428:9428"]
-    volumes: [vlogs:/vlogs]
+    volumes: ["vlogs:/vlogs"]
 
   log-generator:
     image: curlimages/curl:8.11.1
@@ -25,6 +25,7 @@ services:
   loki-vl-proxy:
     build:
       context: ../..
+      dockerfile: deploy/compose/Dockerfile
     environment:
       LOKI_VL_PROXY_UPSTREAM: ${VL_URL:-http://victorialogs:9428}
       LOKI_VL_PROXY_LOG_LEVEL: info

@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -16,8 +15,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: gofmt
@@ -32,13 +31,13 @@ jobs:
   logsql-syntax:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: VictoriaMetrics/VictoriaLogs
           ref: ${{ env.VICTORIALOGS_VERSION }}
           path: _victorialogs
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: _victorialogs/go.mod
       - name: Build vlcheck against VictoriaLogs ${{ env.VICTORIALOGS_VERSION }}
@@ -58,8 +57,8 @@ jobs:
         image: victoriametrics/victoria-logs:v1.54.0
         ports: ["9428:9428"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Ingest sample logs
@@ -77,38 +76,71 @@ jobs:
           LOKI_VL_PROXY_E2E_URL: http://localhost:9428
         run: go test -count=1 -run E2E -v ./internal/proxy/
 
-  docker:
-    needs: [test, logsql-syntax, e2e]
+  # Static binaries, Linux only.
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build linux/${{ matrix.arch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_SHA::12}" \
+            -o dist/linux_${{ matrix.arch }}/loki-vl-proxy ./cmd/loki-vl-proxy
+          file dist/linux_${{ matrix.arch }}/loki-vl-proxy
+      - uses: actions/upload-artifact@v7
+        with:
+          name: loki-vl-proxy-linux-${{ matrix.arch }}
+          path: dist/linux_${{ matrix.arch }}/loki-vl-proxy
+          if-no-files-found: error
+          retention-days: 7
+
+  # Multi-arch image assembled from the binaries above (no compilation in Docker).
+  # Pushed to ghcr.io for main; pull requests only build it.
+  image:
+    needs: [test, logsql-syntax, e2e, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: loki-vl-proxy-linux-*
+          path: artifacts
+      - name: Lay out binaries for the Dockerfile
+        run: |
+          for arch in amd64 arm64; do
+            install -D -m 0755 artifacts/loki-vl-proxy-linux-$arch/loki-vl-proxy dist/linux_$arch/loki-vl-proxy
+          done
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
             type=sha
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ github.ref_name }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
